@@ -174,11 +174,9 @@ func (c *Client) InvalidateStatsCache(ctx context.Context) error {
 }
 
 func (c *Client) InvalidateAllCache(ctx context.Context) error {
-	// Clear error lists cache
 	if err := c.InvalidateErrorCache(ctx); err != nil {
 		return err
 	}
 
-	// Clear stats cache
 	return c.InvalidateStatsCache(ctx)
 }

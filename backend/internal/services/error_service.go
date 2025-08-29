@@ -138,7 +138,6 @@ func (s *ErrorService) DeleteError(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 
-	// Invalidate both error lists and stats cache since deleting changes stats
 	if err := s.redis.InvalidateAllCache(ctx); err != nil {
 		log.Printf("Failed to invalidate cache after deleting error: %v", err)
 	}
@@ -161,16 +160,13 @@ func (s *ErrorService) GetStats(ctx context.Context) (*models.StatsResponse, err
 
 	log.Printf("Retrieved stats from database: %+v", stats)
 
-	// Cache results
 	if err := s.redis.CacheStats(ctx, stats); err != nil {
 		log.Printf("Failed to cache stats: %v", err)
-		// Don't fail the request if caching fails
 	}
 
 	return stats, nil
 }
 
-// StartQueueProcessor processes errors from Redis queue to PostgreSQL
 func (s *ErrorService) StartQueueProcessor(ctx context.Context) {
 	log.Println("Starting error queue processor...")
 
@@ -191,22 +187,15 @@ func (s *ErrorService) StartQueueProcessor(ctx context.Context) {
 				continue // No error available
 			}
 
-			// Process error - check for duplicates and update count
 			if err := s.processError(ctx, error); err != nil {
 				log.Printf("Failed to process error: %v", err)
-				// Could implement retry logic here
 			}
 		}
 	}
 }
 
 func (s *ErrorService) processError(ctx context.Context, error *models.Error) error {
-	// Check if similar error exists (same fingerprint)
 	if error.Fingerprint != nil {
-		// For simplicity, we'll just insert. In production, you'd want to:
-		// 1. Check for existing error with same fingerprint
-		// 2. If exists, increment count and update last_seen
-		// 3. If not, create new error
 	}
 
 	err := s.db.CreateError(error)
@@ -214,7 +203,6 @@ func (s *ErrorService) processError(ctx context.Context, error *models.Error) er
 		return err
 	}
 
-	// Invalidate cache after successful database insert
 	if err := s.redis.InvalidateAllCache(ctx); err != nil {
 		log.Printf("Failed to invalidate cache after processing error: %v", err)
 	}
