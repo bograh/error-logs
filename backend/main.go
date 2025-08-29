@@ -38,7 +38,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize Redis
 	redisClient, err := redis.NewClient(cfg.RedisURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to Redis: %v", err)
@@ -47,22 +46,16 @@ func main() {
 
 	redisClient.FlushAll(context.Background())
 
-	// Initialize services
 	errorService := services.NewErrorService(db, redisClient)
-
-	// Initialize handlers
 	errorHandler := handlers.NewErrorHandler(errorService)
 
-	// Setup router
 	r := chi.NewRouter()
 
-	// Middleware
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// CORS configuration
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},

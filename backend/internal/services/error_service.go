@@ -28,8 +28,6 @@ func NewErrorService(db *database.DB, redis *redis.Client) *ErrorService {
 
 func (s *ErrorService) CreateError(ctx context.Context, req *models.CreateErrorRequest, userAgent, ipAddress string) (*models.Error, error) {
 	now := time.Now().UTC()
-
-	// Generate fingerprint for grouping similar errors
 	fingerprint := generateFingerprint(req.Message, req.StackTrace)
 
 	error := &models.Error{
@@ -40,7 +38,7 @@ func (s *ErrorService) CreateError(ctx context.Context, req *models.CreateErrorR
 		StackTrace:  req.StackTrace,
 		Context:     req.Context,
 		Source:      req.Source,
-		Environment: "production", // Default
+		Environment: "production",
 		UserAgent:   &userAgent,
 		IPAddress:   &ipAddress,
 		URL:         req.URL,
@@ -61,50 +59,55 @@ func (s *ErrorService) CreateError(ctx context.Context, req *models.CreateErrorR
 		error.Context = make(map[string]interface{})
 	}
 
-	// Queue error for processing
 	if err := s.redis.QueueError(ctx, error); err != nil {
 		log.Printf("Failed to queue error to Redis: %v", err)
-		// Fall back to direct database insert
 		if err := s.db.CreateError(error); err != nil {
 			return nil, err
 		}
-		// Clear cache after successful database insert
-		if err := s.redis.InvalidateAllCache(ctx); err != nil {
-			log.Printf("Failed to invalidate cache after direct insert: %v", err)
-		}
+		log.Printf("CACHE INVALIDATION: CreateError (fallback) - invalidating all caches")
+		s.redis.InvalidateAllCache(context.Background())
 		return error, nil
 	}
 
-	// Invalidate cache
-	if err := s.redis.InvalidateAllCache(ctx); err != nil {
-		log.Printf("Failed to invalidate cache after queuing error: %v", err)
-	}
-
+	log.Printf("CACHE INVALIDATION: CreateError - invalidating all caches")
+	s.redis.InvalidateAllCache(context.Background())
 	return error, nil
 }
 
 func (s *ErrorService) GetErrors(ctx context.Context, limit, offset int, level, source string) (*models.ErrorListResponse, error) {
-	// Try cache first
 	cacheKey := fmt.Sprintf("list_%d_%d_%s_%s", limit, offset, level, source)
+	start := time.Now()
+
 	if cachedErrors, err := s.redis.GetCachedErrorList(ctx, cacheKey); err == nil && cachedErrors != nil {
-		total := len(cachedErrors) + offset // Approximate
+		log.Printf("CACHE HIT: GetErrors - key: %s, duration: %v", cacheKey, time.Since(start))
 		return &models.ErrorListResponse{
 			Errors: cachedErrors,
-			Total:  total,
+			Total:  len(cachedErrors) + offset,
 			Page:   (offset / limit) + 1,
 			Limit:  limit,
 		}, nil
 	}
 
-	// Get from database
+	log.Printf("CACHE MISS: GetErrors - key: %s, fetching from database", cacheKey)
 	errors, total, err := s.db.GetErrors(limit, offset, level, source)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache results
+	dbDuration := time.Since(start)
+	log.Printf("DATABASE QUERY: GetErrors completed in %v", dbDuration)
+
 	if len(errors) > 0 {
-		s.redis.CacheErrorList(ctx, cacheKey, errors, 2*time.Minute)
+		go func() {
+			cacheStart := time.Now()
+			// Use background context to avoid cancellation when HTTP request ends
+			cacheCtx := context.Background()
+			if err := s.redis.CacheErrorList(cacheCtx, cacheKey, errors, 2*time.Minute); err != nil {
+				log.Printf("Failed to cache error list: %v", err)
+			} else {
+				log.Printf("CACHE WRITE: GetErrors - key: %s, duration: %v", cacheKey, time.Since(cacheStart))
+			}
+		}()
 	}
 
 	return &models.ErrorListResponse{
@@ -120,49 +123,50 @@ func (s *ErrorService) GetErrorByID(ctx context.Context, id uuid.UUID) (*models.
 }
 
 func (s *ErrorService) ResolveError(ctx context.Context, id uuid.UUID) error {
-	err := s.db.ResolveError(id)
-	if err != nil {
+	if err := s.db.ResolveError(id); err != nil {
 		return err
 	}
-
-	// Invalidate both error lists and stats cache since resolving changes stats
-	if err := s.redis.InvalidateAllCache(ctx); err != nil {
-		log.Printf("Failed to invalidate cache after resolving error: %v", err)
-	}
+	log.Printf("CACHE INVALIDATION: ResolveError - invalidating all caches for error ID: %s", id)
+	go s.redis.InvalidateAllCache(context.Background())
 	return nil
 }
 
 func (s *ErrorService) DeleteError(ctx context.Context, id uuid.UUID) error {
-	err := s.db.DeleteError(id)
-	if err != nil {
+	if err := s.db.DeleteError(id); err != nil {
 		return err
 	}
-
-	if err := s.redis.InvalidateAllCache(ctx); err != nil {
-		log.Printf("Failed to invalidate cache after deleting error: %v", err)
-	}
+	log.Printf("CACHE INVALIDATION: DeleteError - invalidating all caches for error ID: %s", id)
+	go s.redis.InvalidateAllCache(context.Background())
 	return nil
 }
 
 func (s *ErrorService) GetStats(ctx context.Context) (*models.StatsResponse, error) {
-	// Try cache first
+	start := time.Now()
+
 	if cachedStats, err := s.redis.GetCachedStats(ctx); err == nil && cachedStats != nil {
-		log.Printf("Returning cached stats: %+v", cachedStats)
+		log.Printf("CACHE HIT: GetStats - duration: %v", time.Since(start))
 		return cachedStats, nil
 	}
 
-	// Get from database
+	log.Printf("CACHE MISS: GetStats - fetching from database")
 	stats, err := s.db.GetStats()
 	if err != nil {
-		log.Printf("Failed to get stats from database: %v", err)
 		return nil, err
 	}
 
-	log.Printf("Retrieved stats from database: %+v", stats)
+	dbDuration := time.Since(start)
+	log.Printf("DATABASE QUERY: GetStats completed in %v", dbDuration)
 
-	if err := s.redis.CacheStats(ctx, stats); err != nil {
-		log.Printf("Failed to cache stats: %v", err)
-	}
+	go func() {
+		cacheStart := time.Now()
+		// Use background context to avoid cancellation when HTTP request ends
+		cacheCtx := context.Background()
+		if err := s.redis.CacheStats(cacheCtx, stats); err != nil {
+			log.Printf("Failed to cache stats: %v", err)
+		} else {
+			log.Printf("CACHE WRITE: GetStats - duration: %v", time.Since(cacheStart))
+		}
+	}()
 
 	return stats, nil
 }
@@ -195,18 +199,11 @@ func (s *ErrorService) StartQueueProcessor(ctx context.Context) {
 }
 
 func (s *ErrorService) processError(ctx context.Context, error *models.Error) error {
-	if error.Fingerprint != nil {
-	}
-
-	err := s.db.CreateError(error)
-	if err != nil {
+	if err := s.db.CreateError(error); err != nil {
 		return err
 	}
-
-	if err := s.redis.InvalidateAllCache(ctx); err != nil {
-		log.Printf("Failed to invalidate cache after processing error: %v", err)
-	}
-
+	log.Printf("CACHE INVALIDATION: processError - invalidating all caches for processed error")
+	go s.redis.InvalidateAllCache(context.Background())
 	return nil
 }
 
@@ -215,7 +212,6 @@ func generateFingerprint(message string, stackTrace *string) string {
 	if stackTrace != nil {
 		data += *stackTrace
 	}
-
 	hash := sha256.Sum256([]byte(data))
-	return fmt.Sprintf("%x", hash)[:16] // Use first 16 characters
+	return fmt.Sprintf("%x", hash)[:16]
 }
