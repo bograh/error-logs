@@ -46,8 +46,19 @@ func main() {
 
 	redisClient.FlushAll(context.Background())
 
+	// Initialize services
 	errorService := services.NewErrorService(db, redisClient)
+	analyticsService := services.NewAnalyticsService(db, redisClient)
+	monitoringService := services.NewMonitoringService(db, redisClient)
+	alertsService := services.NewAlertsService(db, redisClient)
+	settingsService := services.NewSettingsService(db, redisClient)
+
+	// Initialize handlers
 	errorHandler := handlers.NewErrorHandler(errorService)
+	analyticsHandler := handlers.NewAnalyticsHandler(analyticsService)
+	monitoringHandler := handlers.NewMonitoringHandler(monitoringService)
+	alertsHandler := handlers.NewAlertsHandler(alertsService)
+	settingsHandler := handlers.NewSettingsHandler(settingsService)
 
 	r := chi.NewRouter()
 
@@ -88,6 +99,48 @@ func main() {
 
 		// Stats endpoint
 		r.Get("/stats", errorHandler.GetStats)
+
+		// Analytics endpoints
+		r.Route("/analytics", func(r chi.Router) {
+			r.Get("/trends", analyticsHandler.GetTrends)
+			r.Get("/performance", analyticsHandler.GetPerformanceMetrics)
+		})
+
+		// Monitoring endpoints
+		r.Route("/monitoring", func(r chi.Router) {
+			r.Get("/services", monitoringHandler.GetServiceHealth)
+			r.Get("/metrics", monitoringHandler.GetSystemMetrics)
+			r.Get("/uptime", monitoringHandler.GetUptime)
+		})
+
+		// Alert endpoints
+		r.Route("/alerts", func(r chi.Router) {
+			r.Route("/rules", func(r chi.Router) {
+				r.Get("/", alertsHandler.GetAlertRules)
+				r.Post("/", alertsHandler.CreateAlertRule)
+				r.Put("/{id}", alertsHandler.UpdateAlertRule)
+				r.Delete("/{id}", alertsHandler.DeleteAlertRule)
+			})
+			r.Route("/incidents", func(r chi.Router) {
+				r.Get("/", alertsHandler.GetIncidents)
+				r.Post("/", alertsHandler.CreateIncident)
+				r.Put("/{id}", alertsHandler.UpdateIncident)
+			})
+		})
+
+		// Settings endpoints
+		r.Route("/settings", func(r chi.Router) {
+			r.Route("/api-keys", func(r chi.Router) {
+				r.Get("/", settingsHandler.GetAPIKeys)
+				r.Post("/", settingsHandler.CreateAPIKey)
+				r.Delete("/{id}", settingsHandler.DeleteAPIKey)
+			})
+			r.Route("/team", func(r chi.Router) {
+				r.Get("/", settingsHandler.GetTeamMembers)
+				r.Post("/invite", settingsHandler.InviteTeamMember)
+			})
+			r.Get("/integrations", settingsHandler.GetIntegrations)
+		})
 	})
 
 	// Start background worker for processing Redis queue

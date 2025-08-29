@@ -31,8 +31,10 @@ CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     key_hash VARCHAR(64) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
+    permissions JSONB DEFAULT '["read"]',
     project_id UUID,
     active BOOLEAN DEFAULT TRUE,
+    expires_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_used TIMESTAMP WITH TIME ZONE
 );
@@ -42,6 +44,43 @@ CREATE TABLE projects (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL,
     slug VARCHAR(100) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Alert rules table
+CREATE TABLE alert_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL,
+    condition TEXT NOT NULL,
+    threshold INTEGER NOT NULL,
+    time_window VARCHAR(20) DEFAULT '5m',
+    enabled BOOLEAN DEFAULT TRUE,
+    notifications JSONB DEFAULT '[]',
+    last_triggered TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Incidents table
+CREATE TABLE incidents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(200) NOT NULL,
+    severity VARCHAR(20) DEFAULT 'medium', -- low, medium, high, critical
+    status VARCHAR(20) DEFAULT 'open', -- open, investigating, resolved, closed
+    description TEXT,
+    assigned_to UUID,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Team members table
+CREATE TABLE team_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    role VARCHAR(20) DEFAULT 'viewer', -- owner, admin, developer, viewer
+    status VARCHAR(20) DEFAULT 'active', -- active, invited, suspended
+    last_active TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

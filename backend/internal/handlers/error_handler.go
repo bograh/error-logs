@@ -56,13 +56,13 @@ func APIKeyMiddleware(db *database.DB) func(next http.Handler) http.Handler {
 func (h *ErrorHandler) CreateError(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateErrorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		writeErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	// Validate required fields
 	if req.Message == "" {
-		http.Error(w, "Message is required", http.StatusBadRequest)
+		writeErrorResponse(w, "Message is required", http.StatusBadRequest)
 		return
 	}
 	if req.Level == "" {
@@ -78,13 +78,12 @@ func (h *ErrorHandler) CreateError(w http.ResponseWriter, r *http.Request) {
 
 	error, err := h.errorService.CreateError(r.Context(), &req, userAgent, ipAddress)
 	if err != nil {
-		http.Error(w, "Failed to create error", http.StatusInternalServerError)
+		writeErrorResponse(w, "Failed to create error", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(error)
+	writeSuccessResponse(w, error)
 }
 
 func (h *ErrorHandler) GetErrors(w http.ResponseWriter, r *http.Request) {
@@ -111,65 +110,62 @@ func (h *ErrorHandler) GetErrors(w http.ResponseWriter, r *http.Request) {
 
 	response, err := h.errorService.GetErrors(r.Context(), limit, offset, level, source)
 	if err != nil {
-		http.Error(w, "Failed to get errors", http.StatusInternalServerError)
+		writeErrorResponse(w, "Failed to get errors", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	writeSuccessResponse(w, response)
 }
 
 func (h *ErrorHandler) GetError(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid error ID", http.StatusBadRequest)
+		writeErrorResponse(w, "Invalid error ID", http.StatusBadRequest)
 		return
 	}
 
 	error, err := h.errorService.GetErrorByID(r.Context(), id)
 	if err != nil {
 		if err.Error() == "error not found" {
-			http.Error(w, "Error not found", http.StatusNotFound)
+			writeErrorResponse(w, "Error not found", http.StatusNotFound)
 		} else {
-			http.Error(w, "Failed to get error", http.StatusInternalServerError)
+			writeErrorResponse(w, "Failed to get error", http.StatusInternalServerError)
 		}
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(error)
+	writeSuccessResponse(w, error)
 }
 
 func (h *ErrorHandler) ResolveError(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid error ID", http.StatusBadRequest)
+		writeErrorResponse(w, "Invalid error ID", http.StatusBadRequest)
 		return
 	}
 
 	err = h.errorService.ResolveError(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Failed to resolve error", http.StatusInternalServerError)
+		writeErrorResponse(w, "Failed to resolve error", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "resolved"})
+	writeSuccessResponse(w, map[string]string{"status": "resolved"})
 }
 
 func (h *ErrorHandler) DeleteError(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid error ID", http.StatusBadRequest)
+		writeErrorResponse(w, "Invalid error ID", http.StatusBadRequest)
 		return
 	}
 
 	err = h.errorService.DeleteError(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Failed to delete error", http.StatusInternalServerError)
+		writeErrorResponse(w, "Failed to delete error", http.StatusInternalServerError)
 		return
 	}
 
@@ -180,24 +176,18 @@ func (h *ErrorHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.errorService.GetStats(r.Context())
 	if err != nil {
 		log.Printf("Failed to get stats: %v", err)
-		http.Error(w, "Failed to get stats", http.StatusInternalServerError)
+		writeErrorResponse(w, "Failed to get stats", http.StatusInternalServerError)
 		return
 	}
 
 	if stats == nil {
 		log.Printf("Stats returned nil")
-		http.Error(w, "No stats available", http.StatusInternalServerError)
+		writeErrorResponse(w, "No stats available", http.StatusInternalServerError)
 		return
 	}
 
 	log.Printf("Returning stats to client: %+v", stats)
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		log.Printf("Failed to encode stats: %v", err)
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	writeSuccessResponse(w, stats)
 }
 
 // getClientIP extracts the client IP address from the request
